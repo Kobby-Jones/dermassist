@@ -1,11 +1,13 @@
 import imghdr
 import json
+from typing import List
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from auth import get_current_user
-from clip_service import classify
+from model_service import classify
 from database import get_db
 from models import AnalysisRecord, User
 from schemas import AnalyzeResponse, ConditionScore
@@ -25,9 +27,66 @@ MAGIC_TYPE_MAP = {
 
 
 def _sniff_content_type(data: bytes) -> str | None:
-    """Detect image type from magic bytes using imghdr."""
     detected = imghdr.what(None, h=data)
     return MAGIC_TYPE_MAP.get(detected or "", None)
+
+
+# ── Stats schema ──────────────────────────────────────────────────────────────
+
+class ConditionBreakdown(BaseModel):
+    condition: str
+    count: int
+
+
+class StatsResponse(BaseModel):
+    total_scans: int
+    this_month: int
+    avg_confidence: float
+    breakdown: List[ConditionBreakdown]
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
+
+@router.get("/stats", response_model=StatsResponse)
+def get_stats(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from datetime import datetime, timezone
+    from sqlalchemy import func
+
+    records = (
+        db.query(AnalysisRecord)
+        .filter(AnalysisRecord.user_id == current_user.id)
+        .all()
+    )
+
+    total = len(records)
+    now = datetime.now(timezone.utc)
+    this_month = sum(
+        1 for r in records
+        if r.created_at.year == now.year and r.created_at.month == now.month
+    )
+    avg_conf = (
+        round(sum(r.confidence for r in records) / total, 4) if total > 0 else 0.0
+    )
+
+    # Count per condition
+    counts: dict[str, int] = {}
+    for r in records:
+        counts[r.predicted_condition] = counts.get(r.predicted_condition, 0) + 1
+
+    breakdown = [
+        ConditionBreakdown(condition=k, count=v)
+        for k, v in sorted(counts.items(), key=lambda x: -x[1])
+    ]
+
+    return StatsResponse(
+        total_scans=total,
+        this_month=this_month,
+        avg_confidence=avg_conf,
+        breakdown=breakdown,
+    )
 
 
 @router.post("/analyze", response_model=AnalyzeResponse)
@@ -36,7 +95,6 @@ async def analyze(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    # Read image bytes first so we can sniff type if needed
     image_bytes = await file.read()
 
     if len(image_bytes) > MAX_SIZE_BYTES:
@@ -45,7 +103,6 @@ async def analyze(
             detail="Image must be smaller than 10 MB.",
         )
 
-    # Determine content type — fall back to magic-byte sniffing for octet-stream
     content_type = file.content_type or ""
     if content_type not in ALLOWED_TYPES:
         sniffed = _sniff_content_type(image_bytes)
@@ -57,10 +114,8 @@ async def analyze(
                 detail=f"Unsupported file type: {file.content_type}. Use JPEG, PNG, HEIF or WebP.",
             )
 
-    # Run CLIP classification
     result = classify(image_bytes)
 
-    # Persist anonymised record (no raw image stored)
     record = AnalysisRecord(
         user_id=current_user.id,
         predicted_condition=result["predicted_condition"],
@@ -70,11 +125,11 @@ async def analyze(
     db.add(record)
     db.commit()
 
-    # Build response
     return AnalyzeResponse(
         predicted_condition=result["predicted_condition"],
         confidence=result["confidence"],
         all_scores=[ConditionScore(**s) for s in result["all_scores"]],
         analysis_time_seconds=result["analysis_time_seconds"],
+        description=result["description"],
         disclaimer=result["disclaimer"],
     )

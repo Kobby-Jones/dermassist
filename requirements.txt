@@ -9,7 +9,6 @@ alembic==1.13.1
 pillow==10.3.0
 torch==2.3.0
 torchvision==0.18.0
-git+https://github.com/openai/CLIP.git
 python-dotenv==1.0.1
 pydantic[email]==2.7.1
 pydantic-settings==2.3.0

@@ -4,7 +4,7 @@ from typing import List
 from pydantic import BaseModel, EmailStr
 
 
-# ── Auth ──────────────────────────────────────────────────────────────────────
+# Auth
 
 class RegisterRequest(BaseModel):
     username: str
@@ -22,7 +22,7 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
-# ── Analysis ─────────────────────────────────────────────────────────────────
+# Analysis
 
 class ConditionScore(BaseModel):
     name: str
@@ -34,6 +34,7 @@ class AnalyzeResponse(BaseModel):
     confidence: float
     all_scores: List[ConditionScore]
     analysis_time_seconds: float
+    description: str 
     disclaimer: str = (
         "This is an AI-generated preliminary analysis and does NOT replace "
         "professional medical diagnosis. Always consult a qualified "
@@ -41,7 +42,7 @@ class AnalyzeResponse(BaseModel):
     )
 
 
-# ── History ──────────────────────────────────────────────────────────────────
+# History
 
 class HistoryRecord(BaseModel):
     id: int

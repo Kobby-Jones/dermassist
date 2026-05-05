@@ -1,6 +1,6 @@
 """
 DermAssist – FastAPI Backend
-CLIP-powered zero-shot skin condition analysis API
+Melanoma Detection API (EfficientNet-B0, 3-class classifier)
 """
 
 from contextlib import asynccontextmanager
@@ -8,35 +8,32 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from clip_service import _load_model
 from config import settings
 from database import Base, engine
+from model_service import load_model
 from routers import analyze_router, auth_router, history_router
 
 
-# ── Startup / shutdown ────────────────────────────────────────────────────────
+# Startup / shutdown
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create all DB tables (idempotent)
-    Base.metadata.create_all(bind=engine)
-    # Pre-load CLIP model so the first request isn't slow
-    _load_model()
+    Base.metadata.create_all(bind=engine)   # create DB tables (idempotent)
+    load_model()                             # pre-load EfficientNet weights
     yield
-    # (nothing to teardown)
 
 
-# ── App ───────────────────────────────────────────────────────────────────────
+# App
 app = FastAPI(
     title="DermAssist API",
     description=(
-        "Zero-shot CLIP-powered skin condition analysis backend. "
+        "EfficientNet-B0 melanoma detection backend. "
+        "3 classes: Melanoma · Benign Nevus · Healthy Skin. "
         "For educational use only — not a medical diagnostic device."
     ),
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
-# CORS – allow Flutter app (and Swagger UI) to reach the API
 origins = (
     ["*"]
     if settings.ALLOWED_ORIGINS == "*"
@@ -50,13 +47,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Routers ───────────────────────────────────────────────────────────────────
+# Routers
 app.include_router(auth_router.router)
 app.include_router(analyze_router.router)
 app.include_router(history_router.router)
 
 
-# ── Health check ──────────────────────────────────────────────────────────────
+# Health check
 @app.get("/health", tags=["Health"])
 def health():
-    return {"status": "ok", "service": "DermAssist API"}
+    return {"status": "ok", "service": "DermAssist API", "version": "2.0.0"}
